@@ -66,7 +66,21 @@ fun PauseScreen(
 
         Spacer(Modifier.height(20.dp))
 
-        PrimaryButton("Send anyway", onClick = onSendAnyway)
+        // The lock, shown rather than implied: Confirm is visibly present and
+        // visibly disabled while the reading is elevated. It unlocks on the
+        // Confirm screen after a calm re-scan, or immediately via Send anyway.
+        PrimaryButton("Confirm send", onClick = {}, enabled = false)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Held while the reading is elevated. Breathe and check again to " +
+                "unlock it, or send anyway.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = Pbp.Muted,
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        SecondaryButton("Send anyway", onClick = onSendAnyway)
 
         Spacer(Modifier.height(24.dp))
 
