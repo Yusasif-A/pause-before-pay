@@ -1,0 +1,27 @@
+# Secrets — never commit
+.env
+.env.local
+local.properties
+
+# Gradle / Android build output
+.gradle/
+build/
+captures/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# Signing material
+*.keystore
+*.jks
+
+# IDE
+.idea/
+*.iml
+.cxx/
+
+# OS
+.DS_Store
+Thumbs.db
