@@ -212,9 +212,13 @@ private fun FaceRow(live: LiveReading) {
     val share = live.tenseShare
     val enough = live.acceptedExpressionSamples >= Thresholds.MIN_EXPRESSION_SAMPLES
     val tense = enough && share != null && share >= Thresholds.TENSE_SHARE
+    // "no reading yet" rather than "reading", which looked like a working state
+    // and made the face seem to succeed while pulse and breathing failed. It
+    // means exactly what "--" means on the metric tiles: nothing has arrived.
     val label = when {
-        live.expression == null -> "Face: reading"
-        !enough -> "Face: reading"
+        live.expression == null -> "Face: no reading yet"
+        !enough -> "Face: reading (${live.acceptedExpressionSamples}/" +
+            "${Thresholds.MIN_EXPRESSION_SAMPLES})"
         tense -> "Face: tense"
         else -> "Face: settled"
     }
@@ -232,6 +236,20 @@ private fun FaceRow(live: LiveReading) {
 
 @Composable
 private fun GuidanceCard(live: LiveReading) {
+    // An SDK error outranks framing guidance. Telling someone to "keep still"
+    // while the real problem is an unauthorised metric wastes their time.
+    val error = live.errorText
+    if (error != null) {
+        Card(accent = Pbp.Warn) {
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Chip(text = "sdk problem", accent = Pbp.Warn)
+            }
+            Spacer(Modifier.height(10.dp))
+            Text(error, style = MaterialTheme.typography.bodyMedium, color = Pbp.OnSurface)
+        }
+        return
+    }
+
     val code = live.validation
     val good = code == null || code == ValidationCode.OK || code == ValidationCode.CAMERA_TUNING
     Card(accent = if (good) Pbp.Accent else Pbp.Warn) {
@@ -240,6 +258,10 @@ private fun GuidanceCard(live: LiveReading) {
                 text = code?.name?.replace('_', ' ')?.lowercase() ?: "starting",
                 accent = if (good) Pbp.Accent else Pbp.Warn,
             )
+            live.processing?.let {
+                Spacer(Modifier.width(8.dp))
+                Chip(text = it.name.lowercase(), accent = Pbp.Muted)
+            }
         }
         Spacer(Modifier.height(10.dp))
         Text(
@@ -252,6 +274,20 @@ private fun GuidanceCard(live: LiveReading) {
             style = MaterialTheme.typography.bodyMedium,
             color = Pbp.OnSurface,
         )
+        // Only appears when something is wrong: past warm-up with the validation
+        // stream happy and still no pulse value. It says whether the metrics
+        // stream is silent or delivering empty payloads, which look the same on
+        // screen and have completely different causes.
+        if (live.pastWarmup && live.pulseBpm == null) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "No pulse value yet. Metrics payloads: ${live.payloads} " +
+                    "(cardio ${live.cardioPayloads}, breathing ${live.breathingPayloads}, " +
+                    "face ${live.facePayloads}).",
+                style = MaterialTheme.typography.labelMedium,
+                color = Pbp.Muted,
+            )
+        }
     }
 }
 
