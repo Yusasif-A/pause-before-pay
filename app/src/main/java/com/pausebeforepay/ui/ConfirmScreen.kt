@@ -93,6 +93,15 @@ fun ConfirmScreen(
                 )
             }
 
+            val faceLabel = decision?.faceLabel
+            if (faceLabel != null) {
+                Spacer(Modifier.height(12.dp))
+                Chip(
+                    text = "Face $faceLabel",
+                    accent = if (decision.faceFired) Pbp.Warn else Pbp.Muted,
+                )
+            }
+
             if (decision != null && decision.verdict != Verdict.LOW_CONFIDENCE) {
                 Spacer(Modifier.height(16.dp))
                 Row(modifier = Modifier.fillMaxWidth()) {

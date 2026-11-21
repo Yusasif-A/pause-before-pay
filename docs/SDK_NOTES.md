@@ -12,11 +12,11 @@ than silently fixed.
 |---|---|
 | Validation codes look like `kOk`, `kTooDark` | Kotlin enum `ValidationCode` with `OK`, `TOO_DARK`, `TOO_BRIGHT`, `NO_FACE_FOUND`, `MULTIPLE_FACES_FOUND`, `FACE_NOT_CENTERED`, `FACE_SIZE_OUT_OF_RANGE`, `FACE_TOO_CLOSE`, `FACE_TOO_FAR`, `FACE_TOO_HIGH`, `FACE_TOO_LOW`, `FACE_NOT_FORWARD`, `CHEST_NOT_VISIBLE`, `CAMERA_TUNING`, `FRAME_RATE_TOO_LOW`, `EXCESSIVE_MOTION`. `ValidationStatus` is a data class of `code` **and a human-readable `hint`** — the hint is used directly in the UI. |
 | Android telemetry toggle unconfirmed | `SmartSpectraConfig.enableTelemetry` exists and **defaults to `true`**. The app sets it to `false`. Telemetry never includes raw frames or measured vitals; readiness reports may contain free-text diagnostics. |
-| Warm-up time before the first value is unstated | It is published: pulse first value ≈12 s (and is a 12-second average), breathing rate ≈10 s but **confidence 0 until ≈30 s**, HRV ≈30 s / confident ≈60 s. |
+| Warm-up time before the first value is unstated | It is published: pulse first value â‰ˆ12 s (and is a 12-second average), breathing rate â‰ˆ10 s but **confidence 0 until â‰ˆ30 s**, HRV â‰ˆ30 s / confident â‰ˆ60 s. |
 | Observe metrics via `sdk.metrics` LiveData | `sdk.metricsFlow: SharedFlow<Metrics>` also exists and is **lossless**; LiveData is keep-latest and can drop emissions under main-thread congestion. This app uses `metricsFlow`. |
 | Quality gating = collect only while validation is OK | Samples carry their own `stable: Boolean`, documented as "confidence at or above the published accuracy standard" (≥40 for pulse = ±3 bpm, ≥45 for breathing = ±1 br/min). That is the primary gate here; validation codes are applied per metric on top. |
 
-## Deliberate deviations from the brief's §5 numbers
+## Deliberate deviations from the brief's Â§5 numbers
 
 All constants live in
 [`Thresholds.kt`](../app/src/main/java/com/pausebeforepay/signal/Thresholds.kt).
@@ -37,7 +37,9 @@ sdk.config.apiKey = BuildConfig.PRESAGE_API_KEY
 sdk.config.imageOutputEnabled = false        // we render via PreviewView
 sdk.config.enableTelemetry = false           // defaults to true
 sdk.config.requestedMetrics =
-    SmartSpectraConfig.breathingMetrics + SmartSpectraConfig.cardioMetrics
+    SmartSpectraConfig.breathingMetrics +
+        SmartSpectraConfig.cardioMetrics +
+        listOf(MetricType.EXPRESSIONS)
 sdk.config.previewSurfaceProvider = previewView.surfaceProvider
 sdk.useCamera(CameraSelection.Front)
 
@@ -58,6 +60,29 @@ metrics.breathing.rateList       // List<MeasurementWithConfidence>
 // MeasurementWithConfidence: value: Float, stable: Boolean,
 //                            confidence: Float (0..100), timestamp: Long (micros since epoch)
 ```
+
+## Facial expressions
+
+Each `face.expressionList` entry carries a score per expression type, so the read
+is the highest-confidence score in that sample:
+
+```kotlin
+val top = expression.scoresList
+    .filter { it.confidence > 0f }
+    .maxByOrNull { it.confidence }
+top?.type        // ANGRY, CONTEMPT, DISGUST, FEAR, HAPPY, NEUTRAL, SAD, SURPRISE
+top?.confidence  // Float, 0..100
+```
+
+Expression samples are **frame-driven** (~30 Hz, rate-limited by the SDK), unlike
+the event-driven rates, so one scan accumulates hundreds of them — which is why
+the app judges the face by the *share* of tense samples rather than by the last
+one.
+
+Face metrics need the face-metrics-enabled bundle on the API key. An
+unauthorised metric is omitted from the payload rather than failing `start()`, so
+the app treats an empty field as "face not read", which is deliberately
+different from "face settled".
 
 `requestedMetrics` must not include `BREATHING_AMPLITUDE`, `APNEA`,
 `RESPIRATORY_LINE_LENGTH`, `BASELINE` or `INHALE_EXHALE_RATIO` — they are
@@ -86,8 +111,10 @@ compileSdkMinor = 1
   fit a payment-time scan. Requested as part of `cardioMetrics` but ignored.
 - **`checkDeviceReadiness()`** — useful diagnostics, but with telemetry off its
   report is local only, and the validation stream already drives the UI.
-- **`faceMetrics`** — expressions and landmarks are not needed and would widen
-  what the app senses for no benefit to the decision.
+- **The rest of `faceMetrics`** — `MetricType.EXPRESSIONS` *is* requested, on
+  its own rather than as the whole bundle. `FACE_LANDMARKS`, `BLINKING` and
+  `TALKING` are not: expressions are the only face signal the decision uses, and
+  the others would widen what the app senses for no benefit.
 
 ## Reference
 

@@ -124,6 +124,11 @@ object PlainLanguage {
                 .append(delta).append(" bpm.")
             if (breathing != null) append(" Breathing: ").append(breathing)
                 .append(" breaths per minute.")
+            when (decision.faceTense) {
+                true -> append(" Facial expression: looked tense for most of the check.")
+                false -> append(" Facial expression: looked settled.")
+                null -> Unit
+            }
         }
     }
 
@@ -141,10 +146,15 @@ object PlainLanguage {
     private const val MAX_CHARS = 180
 
     private const val SYSTEM_PROMPT =
-        "You rephrase two numbers into one short, calm sentence for a payment app. " +
-            "Describe only what was measured, in everyday language. " +
-            "Do not diagnose, do not mention illness, stress, fraud, scams or coercion, " +
-            "do not give advice, do not tell the person what to do about their payment. " +
+        "You turn camera readings into one short, calm sentence for a payment app, " +
+            "spoken to the person who was just measured. " +
+            "You may say they seem rushed, hurried or tense, because that is what the " +
+            "readings describe. " +
+            "Describe only what was measured, in everyday language, and hedge it: " +
+            "\"seems\", not \"is\". " +
+            "Do not diagnose anything, do not mention illness or any medical condition, " +
+            "do not mention fraud, scams, theft or anyone pressuring them, " +
+            "do not give advice and do not tell them what to do about their payment. " +
             "Reply with one sentence and nothing else."
 
     /**
@@ -155,6 +165,6 @@ object PlainLanguage {
     private val BANNED = listOf(
         "diagnos", "disease", "condition", "symptom", "medical", "doctor",
         "scam", "fraud", "coerc", "forced", "stolen", "anxiety", "panic",
-        "stress", "hypertension", "arrhythm", "treat",
+        "hypertension", "arrhythm", "treatment",
     )
 }

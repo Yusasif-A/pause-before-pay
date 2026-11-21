@@ -9,9 +9,16 @@ tags: android, kotlin, ai, showdev
 ## What I built
 
 **PauseBeforePay** is a mock money-transfer app with one extra step. Before you
-confirm, it reads your pulse and breathing from the front camera. If you look
-rushed *compared with your own resting rates*, it offers a short pause and a
-guided breath instead of sending straight away.
+confirm, it reads your pulse, your breathing and whether your face looks tense,
+from the front camera. If you look rushed *compared with your own resting
+rates*, it says so in plain words, shows you the amount and the recipient again,
+and offers a guided breath instead of sending straight away.
+
+> **You seem rushed and tense**
+> Confirm you actually want to pay.
+> `Pulse 92 bpm · +19` `Face tense`
+> **NGN 25,000** to **Ada Obi**
+> Is the amount right? Is this the right person? Is anyone telling you to send this?
 
 You can always send anyway. That button is on the pause screen, above the fold,
 and it is never disabled.
@@ -50,6 +57,26 @@ SmartSpectra Android SDK does the sensing; everything else is plain Android.
 ---
 
 ## How the signals drive the UI
+
+### Three signals, one request line
+
+The default metric request is **breathing only**. Pulse and expressions both
+have to be asked for:
+
+```kotlin
+sdk.config.requestedMetrics =
+    SmartSpectraConfig.breathingMetrics +
+        SmartSpectraConfig.cardioMetrics +
+        listOf(MetricType.EXPRESSIONS)
+```
+
+I asked for `EXPRESSIONS` on its own rather than the whole `faceMetrics` bundle.
+Landmarks, blinking and talking would mean sensing more than the decision needs,
+and "we collect it because the SDK offers it" is not a reason.
+
+One thing worth stating plainly, because people assume otherwise: this is
+expression reading, **not face recognition**. The SDK reports that a face looks
+angry or neutral. It has no idea whose face it is and cannot verify identity.
 
 ### Request cardio, or your pulse stays empty
 
@@ -141,9 +168,22 @@ plus a spread measure, a sample count and a date. Median, not mean: one garbage
 sample should not shift a stored baseline.
 
 ```
-ELEVATED if (scanPulse - restingPulse) >= 12 bpm
-      or (scanBreathing - restingBreathing) >= 5 breaths/min
+ELEVATED if (scanPulse - restingPulse)           >= 12 bpm
+      or (scanBreathing - restingBreathing)      >= 5 breaths/min
+      or (tense face reads / all face reads)     >= 0.55
 ```
+
+Three independent triggers, any one of which offers the pause. The face earns
+its place by catching what the pulse rules miss: someone frightened whose heart
+rate has not moved yet. It also fires when the pulse was too noisy to use, since
+a clearly-read face is a reading rather than a failed one.
+
+The face is also the noisiest of the three, and the code says so. Concentrating
+reads as scowling; squinting at a bright screen reads as angry. That is why the
+tense share sits above half, why it needs at least ten confident samples, and
+why a face with too few samples is recorded as *unjudged* rather than *settled* —
+"we did not look" and "we looked and you were fine" are different facts and the
+app must not blur them.
 
 Twelve bpm is four times the SDK's own ±3 bpm error band for a stable sample.
 That is deliberate — it should mean "clearly above", not "measurably above".
@@ -162,7 +202,9 @@ The app has a language-model feature. It is not allowed anywhere near the
 verdict.
 
 `DecisionEngine.decide(summary, baseline)` is a pure function over two data
-classes, with every threshold a named constant in one file. Same numbers in,
+classes, with every threshold a named constant in one file. The face trigger is
+counting and a comparison, same as the others — adding a third signal did not
+mean adding a model. Same numbers in,
 same verdict out. No network, no weights, no randomness. It is covered by JVM
 unit tests, including the boundary cases (79.9 bpm over a 68 bpm baseline is
 calm; 80.0 is elevated) and one test that asserts no generated sentence ever
@@ -196,7 +238,9 @@ one that can't.
 The consent screen shows before the camera ever starts, for both kinds of scan.
 It states, in plain words:
 
-- **What** is measured: pulse rate and breathing rate, from the front camera.
+- **What** is measured: pulse rate, breathing rate, and whether the face looks
+  tense or settled — with the explicit note that the app reads how a face looks,
+  never whose face it is.
 - **Why**: only to decide whether to offer a pause.
 - **Where**: on the device, inside the SDK. Presage's docs are explicit that
   metric computation is on-device and the backend is contacted only to

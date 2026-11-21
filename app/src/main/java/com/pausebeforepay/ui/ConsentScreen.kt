@@ -57,6 +57,12 @@ fun ConsentScreen(
             Text("What is measured", style = MaterialTheme.typography.titleLarge, color = Pbp.OnSurface)
             Spacer(Modifier.height(10.dp))
             BulletLine("Your pulse rate and breathing rate, read from the front camera.")
+            BulletLine(
+                "Whether your face looks tense or settled, from the camera's " +
+                    "expression reading. The app reads how a face looks, never " +
+                    "whose face it is — there is no face recognition here, and it " +
+                    "cannot identify you.",
+            )
             BulletLine("Nothing else. No recording is kept, shown later, or uploaded.")
         }
 

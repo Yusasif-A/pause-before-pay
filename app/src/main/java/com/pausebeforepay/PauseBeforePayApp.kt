@@ -88,6 +88,8 @@ fun PauseBeforePayApp(vm: PaymentViewModel = viewModel()) {
                     LaunchedEffect(Unit) { vm.backToForm() }
                 } else {
                     PauseScreen(
+                        amount = state.amount,
+                        recipient = state.recipient,
                         decision = decision,
                         plainLanguage = state.plainLanguage,
                         onRescan = vm::onRescan,

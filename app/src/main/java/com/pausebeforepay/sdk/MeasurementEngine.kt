@@ -12,6 +12,8 @@ import com.presagetech.smartspectra.CameraSelection
 import com.presagetech.smartspectra.SmartSpectraConfig
 import com.presagetech.smartspectra.SmartSpectraSdk
 import com.presagetech.smartspectra.ValidationCode
+import com.presagetech.smartspectra.proto.MetricTypesProto.MetricType
+import com.presagetech.smartspectra.proto.MetricsProto.ExpressionType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
@@ -34,6 +36,11 @@ data class LiveReading(
     val breathingBrpm: Double? = null,
     val acceptedPulseSamples: Int = 0,
     val acceptedBreathingSamples: Int = 0,
+    /** Latest confident expression, so the face state is visible live. */
+    val expression: ExpressionType? = null,
+    val acceptedExpressionSamples: Int = 0,
+    /** Running share of accepted expression samples that were tense. */
+    val tenseShare: Double? = null,
     val validation: ValidationCode? = null,
     /** The SDK's own human-readable framing hint, when it supplies one. */
     val validationHint: String? = null,
@@ -74,9 +81,14 @@ class MeasurementEngine {
         // Defaults to true. Off, so the consent screen can promise it is off.
         sdk.config.enableTelemetry = false
         // The default request is breathing only -- without cardioMetrics,
-        // cardio.pulseRateList stays empty and pulse never appears.
+        // cardio.pulseRateList stays empty and pulse never appears. EXPRESSIONS
+        // is added on its own rather than the whole faceMetrics bundle: it is
+        // the only face signal this app uses, and landmarks, blinking and
+        // talking would mean sensing more than the decision needs.
         sdk.config.requestedMetrics =
-            SmartSpectraConfig.breathingMetrics + SmartSpectraConfig.cardioMetrics
+            SmartSpectraConfig.breathingMetrics +
+                SmartSpectraConfig.cardioMetrics +
+                listOf(MetricType.EXPRESSIONS)
         sdk.useCamera(CameraSelection.Front)
     }
 
@@ -157,6 +169,22 @@ class MeasurementEngine {
                         )
                     }
                 }
+                if (metrics.hasFace()) {
+                    metrics.face.expressionList.forEach { expression ->
+                        // Each sample carries a score per expression type; the
+                        // one with the highest confidence is the read.
+                        val top = expression.scoresList
+                            .filter { it.confidence > 0f }
+                            .maxByOrNull { it.confidence }
+                            ?: return@forEach
+                        window.onExpressionSample(
+                            type = top.type,
+                            confidence = top.confidence,
+                            timestampMicros = expression.timestamp,
+                            elapsedSeconds = now,
+                        )
+                    }
+                }
                 publish(window, mode, now)
             }
         }
@@ -197,6 +225,9 @@ class MeasurementEngine {
             breathingBrpm = window.lastBreathingSeen,
             acceptedPulseSamples = window.acceptedPulseCount,
             acceptedBreathingSamples = window.acceptedBreathingCount,
+            expression = window.lastExpressionSeen,
+            acceptedExpressionSamples = window.acceptedExpressionCount,
+            tenseShare = window.tenseShareSoFar,
         )
     }
 

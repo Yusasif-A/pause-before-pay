@@ -3,10 +3,12 @@
 **A mock transfer demo, not a real payment app.** No bank, card or payment
 service is connected. Nothing in this repository moves money.
 
-Before you confirm a transfer, PauseBeforePay reads your pulse and breathing
-from the front camera using the [Presage SmartSpectra SDK][sdk]. If you look
-rushed *compared with your own resting rates*, it offers a short pause and a
-guided breath. You can always send anyway.
+Before you confirm a transfer, PauseBeforePay reads your pulse, your breathing
+and whether your face looks tense, from the front camera, using the
+[Presage SmartSpectra SDK][sdk]. If you look rushed *compared with your own
+resting rates*, it says so in plain words — *"You seem to be rushing. Confirm
+you actually want to pay."* — shows you the amount and recipient again, and
+offers a guided breath. You can always send anyway.
 
 Built for the [Presage SmartSpectra SDK Challenge][challenge].
 
@@ -17,13 +19,17 @@ Built for the [Presage SmartSpectra SDK Challenge][challenge].
 ```
 Send form  →  Consent  →  20-40s camera scan  →  Calm?    → Confirm → Success
                                               →  Elevated? → Pause screen
-                                                             ├── Send anyway  → Confirm
-                                                             ├── Check again  → scan
-                                                             └── Cancel
+                                                             â”œâ”€â”€ Send anyway  → Confirm
+                                                             â”œâ”€â”€ Check again  → scan
+                                                             â””â”€â”€ Cancel
 ```
 
-- **Live numbers on screen.** Pulse and breathing appear as the SDK produces
-  them, with a count of how many readings were steady enough to use.
+- **Live numbers on screen.** Pulse, breathing and the face reading appear as
+  the SDK produces them, with a count of how many were steady enough to use.
+- **It interprets, it doesn't just report.** The pause screen leads with the
+  read — *"You seem rushed and tense"* — then shows the pulse, the delta against
+  your baseline and the face state as the evidence underneath, then asks you to
+  re-check the amount and the recipient.
 - **Your own baseline.** One 60-second calibration scan stores your resting
   pulse and breathing. The payment-time check then compares you against
   yourself, not against a population average.
@@ -156,11 +162,20 @@ reading cannot move the result.
 
 | Condition | Verdict |
 |---|---|
-| Fewer than 6 accepted pulse samples | `LOW_CONFIDENCE` → never blocks; shows guidance from the most frequent validation code |
 | Baseline saved, and scan pulse ≥ resting + **12 bpm** | `ELEVATED` |
 | Baseline saved, and scan breathing ≥ resting + **5 breaths/min** | `ELEVATED` |
 | No baseline, and pulse ≥ **100 bpm** or breathing ≥ **20 breaths/min** | `ELEVATED` |
+| **≥ 55%** of **≥ 10** confident face reads were a tense expression | `ELEVATED` |
+| Pulse unusable *and* the face not clearly tense | `LOW_CONFIDENCE` → never blocks; shows guidance from the most frequent validation code |
 | otherwise | `CALM` |
+
+Any one of the three triggers is enough. The face can raise the pause on its own
+— the case the pulse rules miss, someone frightened whose heart rate has not
+moved yet — and it can fire even when the pulse was too noisy to use, because a
+clearly-read face is a reading, not a failed one.
+
+It reads how a face *looks*. It does not recognise faces and cannot identify
+anyone.
 
 12 bpm is four times the SDK's published ±3 bpm error band for a stable sample,
 so it means "clearly above", not "measurably above". These numbers are
@@ -177,7 +192,10 @@ samples after that, and gives up at 40 s.
 The consent screen appears **before the camera ever starts**, for both kinds of
 scan, and declining leads somewhere sane rather than trapping you.
 
-**What is measured:** pulse rate and breathing rate, from the front camera.
+**What is measured:** pulse rate, breathing rate, and whether the face looks
+tense or settled, from the front camera. The expression model reads *how a face
+looks, never whose face it is* — there is no face recognition in the SDK or this
+app, and it cannot identify anyone.
 
 **Why:** only to decide whether to offer a short pause before you confirm.
 
@@ -238,8 +256,18 @@ app/src/test/               JVM tests for the decision and the sample gating
   breathing samples and the decision rests on pulse. Breathing does get captured
   during the 60 s calibration. This is a property of the measurement, not a bug,
   and the app degrades to pulse-only rather than pretending otherwise.
-- **Thresholds are untuned heuristics.** 12 bpm and 5 breaths/min were chosen to
-  mean "clearly above". Real tuning needs readings from many people.
+- **Thresholds are untuned heuristics.** 12 bpm, 5 breaths/min and a 55% tense
+  share were chosen to mean "clearly above". Real tuning needs readings from
+  many people.
+- **The expression model is the noisiest signal here.** Concentrating reads as
+  scowling; squinting at a bright screen reads as angry. That is why the tense
+  share is set above half, and why `Thresholds.TENSE_SHARE` is the first dial to
+  turn if it fires too often. Pulse has a published ±3 bpm error band; the
+  expression model has no equivalent.
+- **Expressions may not be authorised on every API key.** Presage documents face
+  metrics as needing the face-metrics-enabled bundle. If a key lacks it the
+  field simply arrives empty, the face is left unjudged (not "settled"), and the
+  app runs on pulse and breathing alone.
 - **A raised pulse has many causes.** Stairs, caffeine, heat, a cold room, a
   phone held at an awkward angle. The app treats it only as a reason to offer a
   pause, never as evidence of anything.

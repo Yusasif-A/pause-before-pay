@@ -19,6 +19,8 @@ class DecisionEngineTest {
         breathing: Double? = null,
         breathingSamples: Int = 0,
         issue: ValidationCode? = null,
+        tenseShare: Double? = null,
+        expressionSamples: Int = 0,
     ) = ScanSummary(
         pulseBpm = pulse,
         pulseSamples = pulseSamples,
@@ -26,7 +28,10 @@ class DecisionEngineTest {
         breathingSamples = breathingSamples,
         dominantIssue = issue,
         durationSeconds = 25,
+        tenseShare = tenseShare,
+        expressionSamples = expressionSamples,
     )
+
 
     private fun baseline(pulse: Double = 68.0, breathing: Double? = 14.0) = Baseline(
         restingPulseBpm = pulse,
@@ -138,6 +143,116 @@ class DecisionEngineTest {
         assertTrue(DecisionEngine.guidanceFor(null).isNotBlank())
     }
 
+    // ---- Facial expression -------------------------------------------------
+
+    @Test
+    fun `a tense face raises the pause even with a calm pulse`() {
+        val decision = DecisionEngine.decide(
+            scan(
+                pulse = 70.0,
+                tenseShare = Thresholds.TENSE_SHARE + 0.1,
+                expressionSamples = Thresholds.MIN_EXPRESSION_SAMPLES + 5,
+            ),
+            baseline(pulse = 68.0),
+        )
+        assertEquals(Verdict.ELEVATED, decision.verdict)
+        assertTrue(decision.faceFired)
+        assertFalse(decision.pulseFired)
+        assertEquals("You seem tense", decision.headline)
+    }
+
+    @Test
+    fun `a face just under the share threshold does not raise the pause`() {
+        val decision = DecisionEngine.decide(
+            scan(
+                pulse = 70.0,
+                tenseShare = Thresholds.TENSE_SHARE - 0.01,
+                expressionSamples = Thresholds.MIN_EXPRESSION_SAMPLES + 5,
+            ),
+            baseline(pulse = 68.0),
+        )
+        assertEquals(Verdict.CALM, decision.verdict)
+        assertFalse(decision.faceFired)
+        assertEquals(false, decision.faceTense)
+    }
+
+    @Test
+    fun `too few face samples leaves the face unjudged rather than settled`() {
+        val decision = DecisionEngine.decide(
+            scan(
+                pulse = 70.0,
+                tenseShare = 1.0,
+                expressionSamples = Thresholds.MIN_EXPRESSION_SAMPLES - 1,
+            ),
+            baseline(pulse = 68.0),
+        )
+        assertEquals(Verdict.CALM, decision.verdict)
+        assertNull(decision.faceTense)
+        assertNull(decision.faceLabel)
+    }
+
+    @Test
+    fun `a tense face still reads when the pulse was unusable`() {
+        val decision = DecisionEngine.decide(
+            scan(
+                pulse = null,
+                pulseSamples = 0,
+                tenseShare = 1.0,
+                expressionSamples = Thresholds.MIN_EXPRESSION_SAMPLES + 5,
+            ),
+            baseline(pulse = 68.0),
+        )
+        assertEquals(Verdict.ELEVATED, decision.verdict)
+        assertEquals(Basis.FACE_ONLY, decision.basis)
+        assertTrue(decision.blocksConfirm)
+    }
+
+    @Test
+    fun `an unusable pulse and an unjudged face never blocks`() {
+        val decision = DecisionEngine.decide(
+            scan(pulse = null, pulseSamples = 0),
+            baseline(pulse = 68.0),
+        )
+        assertEquals(Verdict.LOW_CONFIDENCE, decision.verdict)
+        assertFalse(decision.blocksConfirm)
+    }
+
+    @Test
+    fun `pulse and face together give the combined headline`() {
+        val decision = DecisionEngine.decide(
+            scan(
+                pulse = 90.0,
+                tenseShare = 1.0,
+                expressionSamples = Thresholds.MIN_EXPRESSION_SAMPLES + 5,
+            ),
+            baseline(pulse = 68.0),
+        )
+        assertEquals("You seem rushed and tense", decision.headline)
+        assertTrue(decision.pulseFired && decision.faceFired)
+    }
+
+    @Test
+    fun `a calm verdict says so plainly`() {
+        val decision = DecisionEngine.decide(scan(pulse = 70.0), baseline(pulse = 68.0))
+        assertEquals("You look settled", decision.headline)
+    }
+
+    @Test
+    fun `every headline hedges rather than asserting a state of mind`() {
+        val headlines = listOf(
+            DecisionEngine.decide(scan(pulse = 90.0), baseline(pulse = 68.0)),
+            DecisionEngine.decide(
+                scan(pulse = 70.0, tenseShare = 1.0, expressionSamples = 20),
+                baseline(pulse = 68.0),
+            ),
+            DecisionEngine.decide(
+                scan(pulse = 90.0, tenseShare = 1.0, expressionSamples = 20),
+                baseline(pulse = 68.0),
+            ),
+        ).map { it.headline }
+        headlines.forEach { assertTrue("not hedged: $it", it.startsWith("You seem")) }
+    }
+
     // ---- Copy rules --------------------------------------------------------
 
     @Test
@@ -147,6 +262,14 @@ class DecisionEngineTest {
             "anxiety", "blocked",
         )
         val decisions = listOf(
+            DecisionEngine.decide(
+                scan(pulse = 70.0, tenseShare = 1.0, expressionSamples = 20),
+                baseline(pulse = 68.0),
+            ),
+            DecisionEngine.decide(
+                scan(pulse = null, pulseSamples = 0, tenseShare = 1.0, expressionSamples = 20),
+                baseline(pulse = 68.0),
+            ),
             DecisionEngine.decide(scan(pulse = 95.0), baseline(pulse = 68.0)),
             DecisionEngine.decide(scan(pulse = 60.0), baseline(pulse = 68.0)),
             DecisionEngine.decide(scan(pulse = 120.0), null),

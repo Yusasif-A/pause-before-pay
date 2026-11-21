@@ -4,10 +4,12 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,6 +25,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.pausebeforepay.signal.Decision
 import com.pausebeforepay.signal.Thresholds
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 
 /**
@@ -35,6 +38,8 @@ import kotlinx.coroutines.delay
  */
 @Composable
 fun PauseScreen(
+    amount: String,
+    recipient: String,
     decision: Decision,
     plainLanguage: String?,
     onRescan: () -> Unit,
@@ -42,9 +47,11 @@ fun PauseScreen(
     onCancel: () -> Unit,
 ) {
     Screen {
+        // The headline is the plain-language read of the moment; the numbers
+        // that produced it stay on screen directly underneath as the evidence.
         ScreenTitle(
-            "You seem rushed",
-            "Take a short pause before sending?",
+            decision.headline,
+            "Confirm you actually want to pay.",
         )
 
         Card(accent = Pbp.Warn) {
@@ -53,8 +60,12 @@ fun PauseScreen(
                 style = MaterialTheme.typography.bodyLarge,
                 color = Pbp.OnSurface,
             )
+
+            Spacer(Modifier.height(14.dp))
+            EvidenceRow(decision)
+
             if (plainLanguage != null) {
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(12.dp))
                 Text(
                     "Wording from a language model. The decision itself was made on " +
                         "this phone by fixed arithmetic.",
@@ -62,6 +73,33 @@ fun PauseScreen(
                     color = Pbp.Muted,
                 )
             }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        // The point of the pause: re-read what you are about to do. A rushed
+        // person mistypes an amount or picks the wrong saved payee.
+        Card {
+            Text(
+                "Check this before you send",
+                style = MaterialTheme.typography.titleLarge,
+                color = Pbp.OnSurface,
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "NGN " + formatAmount(amount),
+                style = MaterialTheme.typography.displaySmall,
+                color = Pbp.OnSurface,
+            )
+            Text(
+                "to " + recipient.ifBlank { "Unnamed recipient" },
+                style = MaterialTheme.typography.headlineSmall,
+                color = Pbp.OnSurface,
+            )
+            Spacer(Modifier.height(12.dp))
+            BulletLine("Is the amount right?")
+            BulletLine("Is this the right person?")
+            BulletLine("Is anyone telling you to send this?")
         }
 
         Spacer(Modifier.height(20.dp))
@@ -91,6 +129,44 @@ fun PauseScreen(
         Spacer(Modifier.height(10.dp))
         QuietButton("Cancel this transfer", onClick = onCancel)
         Spacer(Modifier.height(16.dp))
+    }
+}
+
+/**
+ * The measured evidence, as chips. Only signals that actually fired are
+ * highlighted, so the person can see which reading raised the pause.
+ */
+@Composable
+private fun EvidenceRow(decision: Decision) {
+    Row(modifier = Modifier.fillMaxWidth()) {
+        val pulse = decision.pulseBpm?.roundToInt()
+        if (pulse != null) {
+            val delta = decision.pulseDeltaBpm?.roundToInt()
+            Chip(
+                text = if (delta != null && delta > 0) {
+                    "Pulse $pulse bpm  ·  +$delta"
+                } else {
+                    "Pulse $pulse bpm"
+                },
+                accent = if (decision.pulseFired) Pbp.Pulse else Pbp.Muted,
+            )
+            Spacer(Modifier.width(8.dp))
+        }
+        val face = decision.faceLabel
+        if (face != null) {
+            Chip(
+                text = "Face $face",
+                accent = if (decision.faceFired) Pbp.Warn else Pbp.Muted,
+            )
+        }
+    }
+    val breathing = decision.breathingBrpm?.roundToInt()
+    if (breathing != null) {
+        Spacer(Modifier.height(8.dp))
+        Chip(
+            text = "Breathing $breathing breaths/min",
+            accent = if (decision.breathingFired) Pbp.Breath else Pbp.Muted,
+        )
     }
 }
 

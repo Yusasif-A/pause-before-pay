@@ -1,6 +1,7 @@
 package com.pausebeforepay.signal
 
 import com.presagetech.smartspectra.ValidationCode
+import com.presagetech.smartspectra.proto.MetricsProto.ExpressionType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -168,6 +169,62 @@ class SampleWindowTest {
         assertEquals(70.0, baseline!!.restingPulseBpm, 0.001)
         assertNull(baseline.restingBreathingBrpm)
         assertEquals(123L, baseline.recordedAtEpochMillis)
+    }
+
+    @Test
+    fun `low-confidence expression samples are ignored`() {
+        val w = window()
+        w.onValidation(ValidationCode.OK)
+        w.onExpressionSample(
+            ExpressionType.ANGRY,
+            confidence = Thresholds.MIN_EXPRESSION_CONFIDENCE - 1f,
+            timestampMicros = 1,
+            elapsedSeconds = 20.0,
+        )
+        assertEquals(0, w.acceptedExpressionCount)
+        assertNull(w.lastExpressionSeen)
+    }
+
+    @Test
+    fun `expression samples are gated by warm-up and framing`() {
+        val w = window()
+        w.onValidation(ValidationCode.OK)
+        w.onExpressionSample(ExpressionType.ANGRY, 90f, 1, elapsedSeconds = 5.0)
+        assertEquals(0, w.acceptedExpressionCount)
+        // Shown live even during warm-up.
+        assertEquals(ExpressionType.ANGRY, w.lastExpressionSeen)
+
+        w.onValidation(ValidationCode.NO_FACE_FOUND)
+        w.onExpressionSample(ExpressionType.ANGRY, 90f, 2, elapsedSeconds = 20.0)
+        assertEquals(0, w.acceptedExpressionCount)
+
+        w.onValidation(ValidationCode.OK)
+        w.onExpressionSample(ExpressionType.ANGRY, 90f, 3, elapsedSeconds = 20.0)
+        assertEquals(1, w.acceptedExpressionCount)
+    }
+
+    @Test
+    fun `tense share counts only tense expressions`() {
+        val w = window()
+        w.onValidation(ValidationCode.OK)
+        w.onExpressionSample(ExpressionType.ANGRY, 90f, 1, 20.0)
+        w.onExpressionSample(ExpressionType.FEAR, 90f, 2, 20.0)
+        w.onExpressionSample(ExpressionType.NEUTRAL, 90f, 3, 20.0)
+        w.onExpressionSample(ExpressionType.HAPPY, 90f, 4, 20.0)
+        assertEquals(4, w.acceptedExpressionCount)
+        assertEquals(0.5, w.tenseShareSoFar!!, 0.001)
+    }
+
+    @Test
+    fun `the summary carries the face reading through`() {
+        val w = window()
+        w.onValidation(ValidationCode.OK)
+        repeat(Thresholds.MIN_EXPRESSION_SAMPLES + 2) { index ->
+            w.onExpressionSample(ExpressionType.FEAR, 90f, index.toLong() + 1, 20.0)
+        }
+        val summary = w.summarize(25.0)
+        assertEquals(ExpressionType.FEAR, summary.dominantExpression)
+        assertEquals(true, summary.faceTense)
     }
 
     @Test

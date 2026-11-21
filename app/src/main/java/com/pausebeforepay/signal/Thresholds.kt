@@ -1,6 +1,7 @@
 package com.pausebeforepay.signal
 
 import com.presagetech.smartspectra.ValidationCode
+import com.presagetech.smartspectra.proto.MetricsProto.ExpressionType
 
 /**
  * Every tunable number in PauseBeforePay lives here.
@@ -109,6 +110,48 @@ object Thresholds {
         ValidationCode.CHEST_NOT_VISIBLE,
         ValidationCode.FACE_NOT_FORWARD,
     )
+
+    // ---- Facial expression --------------------------------------------------
+
+    /**
+     * A sustained tense face can raise the pause on its own, alongside pulse
+     * and breathing. It catches the case the pulse rules miss: someone who is
+     * frightened but whose heart rate has not moved yet.
+     *
+     * The rule is still plain arithmetic over named constants — count the
+     * confident samples, count how many were tense, compare the share with
+     * [TENSE_SHARE] — so it stays as auditable as the pulse rule.
+     *
+     * The honest caveat, which is why the share is set high: an expression
+     * model is noisier than a pulse rate. Concentrating reads as scowling and
+     * squinting at a bright screen reads as angry. [TENSE_SHARE] is the dial to
+     * turn if it fires too often in real use.
+     *
+     * The SDK's expression model emits ANGRY, CONTEMPT, DISGUST, FEAR, HAPPY,
+     * NEUTRAL, SAD and SURPRISE with a confidence in 0..100. It does not do
+     * face recognition: this says how a face looks, never whose face it is.
+     */
+    val TENSE_EXPRESSIONS: Set<ExpressionType> = setOf(
+        ExpressionType.ANGRY,
+        ExpressionType.FEAR,
+        ExpressionType.SAD,
+        ExpressionType.CONTEMPT,
+        ExpressionType.DISGUST,
+        ExpressionType.SURPRISE,
+    )
+
+    /** Below this confidence an expression sample is ignored entirely. */
+    const val MIN_EXPRESSION_CONFIDENCE = 50f
+
+    /** Fewer accepted samples than this and the face is not judged at all. */
+    const val MIN_EXPRESSION_SAMPLES = 10
+
+    /**
+     * Share of accepted samples that must be tense before the face counts as
+     * tense. Set above half deliberately: the face can trigger a pause, so a
+     * brief frown must not be enough.
+     */
+    const val TENSE_SHARE = 0.55
 
     // ---- Breath pacer -------------------------------------------------------
 

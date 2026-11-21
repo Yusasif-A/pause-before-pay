@@ -1,6 +1,7 @@
 package com.pausebeforepay.signal
 
 import com.presagetech.smartspectra.ValidationCode
+import com.presagetech.smartspectra.proto.MetricsProto.ExpressionType
 
 /** Which of the two measurement contexts a window is collecting for. */
 enum class ScanMode {
@@ -59,7 +60,11 @@ class SampleWindow(private val mode: ScanMode) {
     private val breathing = mutableListOf<Double>()
     private var lastPulseTimestamp = Long.MIN_VALUE
     private var lastBreathingTimestamp = Long.MIN_VALUE
+    private var lastExpressionTimestamp = Long.MIN_VALUE
     private val issueCounts = mutableMapOf<ValidationCode, Int>()
+    private val expressionCounts = mutableMapOf<ExpressionType, Int>()
+    private var tenseCount = 0
+    private var expressionCount = 0
 
     /** Last value seen at all, stable or not — shown live so the UI is never blank. */
     var lastPulseSeen: Double? = null
@@ -70,8 +75,20 @@ class SampleWindow(private val mode: ScanMode) {
     var currentValidation: ValidationCode? = null
         private set
 
+    /** Last expression seen at all, shown live during the scan. */
+    var lastExpressionSeen: ExpressionType? = null
+        private set
+
     val acceptedPulseCount: Int get() = pulse.size
     val acceptedBreathingCount: Int get() = breathing.size
+    val acceptedExpressionCount: Int get() = expressionCount
+
+    /**
+     * Running share of accepted samples that were tense, so the scan screen can
+     * show the face state live rather than only at the end.
+     */
+    val tenseShareSoFar: Double?
+        get() = if (expressionCount == 0) null else tenseCount.toDouble() / expressionCount
 
     fun onValidation(code: ValidationCode?) {
         currentValidation = code
@@ -108,6 +125,31 @@ class SampleWindow(private val mode: ScanMode) {
     }
 
     /**
+     * Expression samples are frame-driven, so these arrive far more often than
+     * the rates do — roughly 30 per second, rate-limited by the SDK. Only
+     * confident samples count, and the face has to be properly in frame for the
+     * sample to mean anything, so the pulse blocker set applies.
+     */
+    fun onExpressionSample(
+        type: ExpressionType,
+        confidence: Float,
+        timestampMicros: Long,
+        elapsedSeconds: Double,
+    ) {
+        if (timestampMicros <= lastExpressionTimestamp) return
+        lastExpressionTimestamp = timestampMicros
+        if (confidence < Thresholds.MIN_EXPRESSION_CONFIDENCE) return
+        lastExpressionSeen = type
+        if (elapsedSeconds < mode.warmupSeconds) return
+        if (currentValidation in Thresholds.PULSE_BLOCKERS) return
+        expressionCount++
+        expressionCounts[type] = (expressionCounts[type] ?: 0) + 1
+        if (type in Thresholds.TENSE_EXPRESSIONS) tenseCount++
+    }
+
+    fun dominantExpression(): ExpressionType? = expressionCounts.maxByOrNull { it.value }?.key
+
+    /**
      * A payment scan may finish early once it has what it needs, but never
      * before its target length; a calibration always runs its full length.
      */
@@ -125,6 +167,9 @@ class SampleWindow(private val mode: ScanMode) {
         breathingSamples = breathing.size,
         dominantIssue = dominantIssue(),
         durationSeconds = elapsedSeconds.toInt(),
+        dominantExpression = dominantExpression(),
+        tenseShare = tenseShareSoFar,
+        expressionSamples = expressionCount,
     )
 
     /**

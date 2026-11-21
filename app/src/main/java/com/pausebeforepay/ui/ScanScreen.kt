@@ -39,6 +39,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import com.pausebeforepay.sdk.LiveReading
 import com.pausebeforepay.signal.DecisionEngine
 import com.pausebeforepay.signal.ScanMode
+import com.pausebeforepay.signal.Thresholds
 import com.presagetech.smartspectra.ValidationCode
 import kotlin.math.roundToInt
 
@@ -168,6 +169,10 @@ fun ScanScreen(
             )
         }
 
+        Spacer(Modifier.height(10.dp))
+
+        FaceRow(live)
+
         Spacer(Modifier.height(14.dp))
 
         val progress = if (live.targetSeconds > 0) {
@@ -195,6 +200,33 @@ fun ScanScreen(
 
         Spacer(Modifier.height(14.dp))
         QuietButton("Cancel", onClick = onCancel)
+    }
+}
+
+/**
+ * The live face reading. Shown as plain words rather than the raw model label,
+ * and only once enough confident samples have arrived to mean anything.
+ */
+@Composable
+private fun FaceRow(live: LiveReading) {
+    val share = live.tenseShare
+    val enough = live.acceptedExpressionSamples >= Thresholds.MIN_EXPRESSION_SAMPLES
+    val tense = enough && share != null && share >= Thresholds.TENSE_SHARE
+    val label = when {
+        live.expression == null -> "Face: reading"
+        !enough -> "Face: reading"
+        tense -> "Face: tense"
+        else -> "Face: settled"
+    }
+    Row(modifier = Modifier.fillMaxWidth()) {
+        Chip(text = label, accent = if (tense) Pbp.Warn else Pbp.Muted)
+        if (enough) {
+            Spacer(Modifier.width(8.dp))
+            Chip(
+                text = "${live.acceptedExpressionSamples} face reads",
+                accent = Pbp.Muted,
+            )
+        }
     }
 }
 
