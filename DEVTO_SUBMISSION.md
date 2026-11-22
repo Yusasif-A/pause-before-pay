@@ -16,11 +16,15 @@ Before you confirm a transfer, the front camera reads your pulse rate, your brea
 
 Then it shows you the amount and the recipient again, offers a three-breath pacer if you want it, and puts **Send anyway** right there on the screen — always visible, never disabled.
 
-No bank is connected. No money moves. It is a demo of one interaction: the moment between deciding to send and actually sending.
+**This is not a bank app, and it is not trying to be one.** It is a component designed to drop into one — the send form and confirm screen here exist only to give the pause somewhere to live. No bank is connected and no money moves.
 
 ### Why that moment
 
-Transfer confirmation screens are designed to be frictionless, which is wonderful right up until someone is hurrying you. Wrong account number. Wrong amount. Someone on the phone saying *send it now*. The confirm screen looks identical in every one of those cases, because it has no idea what state you are in.
+In 2025 Nigerians lost **₦25.85 billion** to electronic payment fraud across **67,518 reported cases** ([NIBSS, via the Nigeria Electronic Fraud Forum](https://techeconomy.ng/nibss-digital-payment-fraud-drops-51-to-%E2%82%A625-85b-in-2025)). NIBSS named the single biggest technique, and it was not hacking — it was **social engineering**. Somebody talks you into sending the money yourself.
+
+The other failure costs just as much and gets less attention: the wrong account number. In Nigeria a completed transfer is **not automatically reversible**. The CBN's process starts with notifying your own bank, and if the recipient has spent it and will not give it back, recovery can take a court order.
+
+Both failures happen in the same half second — the moment you tap confirm without really reading the screen, because you are rushed, or because somebody is standing over you. And the confirm screen looks identical in every one of those cases, because it has no idea what state you are in.
 
 A camera-based vitals SDK gives the app one weak signal about that state. That is a terrible basis for blocking a payment, and a reasonable basis for asking a question.
 
@@ -167,9 +171,11 @@ I would rather show that than fake a number. The degradation path is the part of
 
 **Best Thoughtful Real-World Use.**
 
-Authorised push payment fraud works by manufacturing urgency. "Send it now, the account will close." "Your money is at risk, move it immediately." Every bank's answer so far is a static warning screen that everyone taps past, because it appears identically whether you are relaxed or being rushed by someone on the phone.
+₦25.85 billion, 67,518 cases, and social engineering as the number one technique. Authorised push payment fraud works by manufacturing urgency — "send it now, the account will close", "your money is at risk, move it immediately". Every bank's answer so far is a static warning screen that everyone taps past, because it appears identically whether you are relaxed or being rushed by someone on the phone.
 
 This is for people at the moment of a transfer they may regret: the ones sending to a wrong account number because they did not re-read it, the ones pushed into a payment by someone standing over them, the older relative on a call with a "bank official".
+
+It is deliberately built as a **component, not a product**. A bank already owns the send form, the confirm screen and the ledger. What it does not have is any read on the person's state at the moment of confirmation, and that is the only thing this adds.
 
 Designing it to be usable for those people meant three deliberate constraints:
 
