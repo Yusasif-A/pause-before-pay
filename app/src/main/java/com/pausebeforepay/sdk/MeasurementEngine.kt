@@ -183,6 +183,10 @@ class MeasurementEngine {
         var facePayloads = 0
         var pulseSamplesSeen = 0
         var lastLoggedValidation: ValidationCode? = null
+        // The SDK appears to produce metrics only while the frame actually
+        // passes validation, so a scan that never reaches OK explains itself.
+        var sawValidationOk = false
+        var processingFailed = false
 
         fun pushCounts(now: Double) = publish(
             window = window,
@@ -207,6 +211,7 @@ class MeasurementEngine {
         observers += launch(work) {
             sdk.validationStatus.asFlow().collect { status ->
                 window.onValidation(status?.code)
+                if (status?.code == ValidationCode.OK) sawValidationOk = true
                 if (status?.code != lastLoggedValidation) {
                     lastLoggedValidation = status?.code
                     DeviceLog.add("validation ${status?.code} ${status?.hint.orEmpty()}")
@@ -222,6 +227,10 @@ class MeasurementEngine {
             sdk.processingStatus.asFlow().collect { status ->
                 Log.i(TAG, "processingStatus = $status")
                 DeviceLog.add("processing $status")
+                // ERROR is terminal: the SDK does not recover on its own, and
+                // the old code sat through the remaining 17 seconds of a dead
+                // pipeline before reporting anything.
+                if (status == ProcessingStatus.ERROR) processingFailed = true
                 _live.value = _live.value.copy(processing = status)
             }
         }
@@ -346,6 +355,7 @@ class MeasurementEngine {
                     }
                     pushCounts(now)
                     if (asyncFailure != null) break
+                    if (processingFailed) break
                     if (window.shouldStop(now)) break
                 }
             }
@@ -368,7 +378,22 @@ class MeasurementEngine {
             _live.value = LiveReading()
         }
 
-        val failure = asyncFailure
+        // A scan that collected nothing is reported as a failure with a reason,
+        // not as a merely unclear reading. "Reading was unclear" is true but
+        // useless when the real answer is "your chest was never in the picture".
+        val failure = asyncFailure ?: when {
+            payloads > 0 -> null
+            !sawValidationOk ->
+                "The camera never got a clear enough view to measure. Keep your " +
+                    "whole face AND the top of your chest in the picture, about " +
+                    "an arm's length away, in bright even light."
+            processingFailed ->
+                "The camera skipped frames and the measurement stopped. Brighter " +
+                    "light and closing other apps both help."
+            else ->
+                "The SDK sent no readings during this check. Try again in " +
+                    "brighter light, holding still."
+        }
         if (failure != null) ScanSummary.failed(failure) else window.summarize(elapsed())
     }
 
