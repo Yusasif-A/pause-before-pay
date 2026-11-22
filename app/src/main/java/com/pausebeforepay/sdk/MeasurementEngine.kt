@@ -152,6 +152,7 @@ class MeasurementEngine {
         fun elapsed(): Double = (SystemClock.elapsedRealtime() - startedAt) / 1000.0
 
         var asyncFailure: String? = null
+        var lastErrorAt = 0L
         var payloads = 0
         var cardioPayloads = 0
         var breathingPayloads = 0
@@ -203,6 +204,7 @@ class MeasurementEngine {
                 // error used to be logged and nothing else, which produced a
                 // scan that ran its full length, collected nothing, and offered
                 // no explanation anywhere on screen.
+                lastErrorAt = SystemClock.elapsedRealtime()
                 _live.value = _live.value.copy(
                     errorText = readableError(error.code.name, error.message),
                 )
@@ -284,6 +286,15 @@ class MeasurementEngine {
             while (isActive) {
                 delay(TICK_MILLIS)
                 val now = elapsed()
+                // A dropped-frame error is usually a passing blip. Leaving it
+                // on screen for the rest of the scan hides the framing guidance
+                // underneath it, so it fades once nothing has gone wrong for a
+                // few seconds. A fatal error breaks the loop below regardless.
+                if (_live.value.errorText != null &&
+                    SystemClock.elapsedRealtime() - lastErrorAt > ERROR_VISIBLE_MILLIS
+                ) {
+                    _live.value = _live.value.copy(errorText = null)
+                }
                 pushCounts(now)
                 if (asyncFailure != null) break
                 if (window.shouldStop(now)) break
@@ -376,5 +387,6 @@ class MeasurementEngine {
     private companion object {
         const val TAG = "MeasurementEngine"
         const val TICK_MILLIS = 250L
+        const val ERROR_VISIBLE_MILLIS = 6_000L
     }
 }

@@ -134,13 +134,14 @@ fun ScanScreen(
                         PreviewView(ctx).apply {
                             contentDescription = "Front camera preview"
                             scaleType = PreviewView.ScaleType.FILL_CENTER
-                            // PERFORMANCE uses a SurfaceView, which the system
-                            // composites directly. COMPATIBLE routes every
-                            // frame through a TextureView and an extra GPU
-                            // copy, which costs throughput the SDK needs: it
-                            // reports SUSTAINED_LOW_FRAME_RATE and computes
-                            // nothing when frames do not keep up.
-                            implementationMode = PreviewView.ImplementationMode.PERFORMANCE
+                            // Back to COMPATIBLE. PERFORMANCE uses a
+                            // SurfaceView whose surface is not ready when the
+                            // factory runs, so start() could bind a provider
+                            // with no surface behind it yet and the camera
+                            // restarted underneath the SDK, which showed up as
+                            // TIMESTAMP_GAP. A TextureView costs one GPU copy
+                            // but its surface lifecycle is predictable.
+                            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
                             onPreviewSurfaceReady(surfaceProvider)
                             surfaceReady = true
                         }
