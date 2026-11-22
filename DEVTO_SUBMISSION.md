@@ -30,9 +30,9 @@ A camera-based vitals SDK gives the app one weak signal about that state. That i
 
 ## Demo
 
-<!-- Paste your uploaded video link here -->
+{% embed https://youtu.be/9dLP9h82PW8 %}
 
-The video walks through the real app on a physical Android phone: the send form, the consent screen, the live camera check with the SDK's own validation feedback, how the reading is actually taken, the decision rule, and the pause screen.
+The video walks through the real app on a physical Android phone: the send form, the consent screen, the live camera check with the SDK's own validation feedback, how a pulse is actually read from light, the decision rule, and the pause screen.
 
 ## Code
 
