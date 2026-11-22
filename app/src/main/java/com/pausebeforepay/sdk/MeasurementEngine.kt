@@ -103,6 +103,9 @@ class MeasurementEngine {
 
     private fun configure() {
         sdk.config.apiKey = BuildConfig.PRESAGE_API_KEY
+        // config.logLevel is left alone: its enum type is obfuscated in the
+        // published AAR and has no importable name. The SDK still logs into
+        // our process at its default level, which the Diagnostics screen reads.
         // We draw the camera ourselves through a PreviewView, so we do not need
         // the SDK's bitmap frames. This is the pairing the quickstart uses.
         sdk.config.imageOutputEnabled = false
