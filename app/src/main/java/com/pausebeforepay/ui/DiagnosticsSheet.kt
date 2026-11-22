@@ -38,7 +38,7 @@ import com.pausebeforepay.diag.DeviceLog
 @Composable
 fun DiagnosticsSheet(onClose: () -> Unit) {
     val context = LocalContext.current
-    var text by remember { mutableStateOf(DeviceLog.capture()) }
+    var text by remember { mutableStateOf(DeviceLog.snapshot()) }
 
     Column(
         modifier = Modifier
@@ -68,7 +68,7 @@ fun DiagnosticsSheet(onClose: () -> Unit) {
             Spacer(Modifier.width(12.dp))
             SecondaryButton(
                 "Refresh",
-                onClick = { text = DeviceLog.capture() },
+                onClick = { text = DeviceLog.snapshot() },
                 modifier = Modifier.weight(1f),
             )
         }

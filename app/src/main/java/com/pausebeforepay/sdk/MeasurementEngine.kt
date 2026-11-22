@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.camera.core.Preview
 import androidx.lifecycle.asFlow
 import com.pausebeforepay.BuildConfig
+import com.pausebeforepay.diag.DeviceLog
 import com.pausebeforepay.signal.SampleWindow
 import com.pausebeforepay.signal.ScanMode
 import com.pausebeforepay.signal.ScanSummary
@@ -15,6 +16,8 @@ import com.presagetech.smartspectra.ValidationCode
 import com.presagetech.smartspectra.proto.MetricTypesProto.MetricType
 import com.presagetech.smartspectra.proto.MetricsProto.ExpressionType
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
@@ -71,9 +74,24 @@ data class LiveReading(
  * off here (it defaults to on) so the consent screen can say, truthfully, that
  * nothing about a measurement leaves the phone.
  *
- * [runMeasurement] is a suspend function that owns one whole measurement:
- * observe, start, collect, stop. Cancelling the calling coroutine stops the
- * camera.
+ * ## Threading
+ *
+ * Only [SmartSpectraSdk.start] and [SmartSpectraSdk.stop] run on the main
+ * thread, because CameraX binds its use cases there. Everything else -- the
+ * metrics, validation, processing and error collectors, and the progress tick
+ * -- runs on a single background thread.
+ *
+ * That split is not tidiness. On a Redmi Note 11 the old main-thread version
+ * logged `Slow Binder: BpBinder transact took 793ms` against
+ * `ICameraDeviceUser` and frames of 1858ms: parsing eight expression scores at
+ * 30 Hz, and recomposing the whole screen just as often, starved the camera's
+ * own binder calls. The SDK saw the resulting holes in the frame timestamps and
+ * reported TIMESTAMP_GAP, which it must, because a pulse cannot be read from an
+ * unevenly sampled signal. The work is the same; it just no longer sits in
+ * front of the camera.
+ *
+ * One background thread, not several: [SampleWindow] is not thread-safe, and
+ * the validation collector and the metrics collector both touch it.
  */
 class MeasurementEngine {
 
@@ -104,8 +122,8 @@ class MeasurementEngine {
     private fun configure() {
         sdk.config.apiKey = BuildConfig.PRESAGE_API_KEY
         // config.logLevel is left alone: its enum type is obfuscated in the
-        // published AAR and has no importable name. The SDK still logs into
-        // our process at its default level, which the Diagnostics screen reads.
+        // published AAR and has no importable name.
+        //
         // We draw the camera ourselves through a PreviewView, so we do not need
         // the SDK's bitmap frames. This is the pairing the quickstart uses.
         sdk.config.imageOutputEnabled = false
@@ -149,6 +167,9 @@ class MeasurementEngine {
 
         configure()
 
+        DeviceLog.beginSection("scan: $mode")
+        DeviceLog.add("sdk ${sdkVersion}, requested ${sdk.config.requestedMetrics}")
+
         // Restarted the moment start() returns, so "warm-up" means "since the
         // camera opened" rather than "since we began observing".
         var startedAt = SystemClock.elapsedRealtime()
@@ -160,6 +181,8 @@ class MeasurementEngine {
         var cardioPayloads = 0
         var breathingPayloads = 0
         var facePayloads = 0
+        var pulseSamplesSeen = 0
+        var lastLoggedValidation: ValidationCode? = null
 
         fun pushCounts(now: Double) = publish(
             window = window,
@@ -171,15 +194,23 @@ class MeasurementEngine {
             facePayloads = facePayloads,
         )
 
+        // Everything except start()/stop() runs here, off the main thread, and
+        // single-threaded because SampleWindow is not thread-safe.
+        val work: CoroutineDispatcher = Dispatchers.Default.limitedParallelism(1)
+
         // Observers go up BEFORE start(), which is the order the SDK's own
         // quickstart uses. metricsFlow is a SharedFlow with no replay, so a
         // collector registered after start() silently misses anything emitted
         // in between.
         val observers = mutableListOf<Job>()
 
-        observers += launch {
+        observers += launch(work) {
             sdk.validationStatus.asFlow().collect { status ->
                 window.onValidation(status?.code)
+                if (status?.code != lastLoggedValidation) {
+                    lastLoggedValidation = status?.code
+                    DeviceLog.add("validation ${status?.code} ${status?.hint.orEmpty()}")
+                }
                 _live.value = _live.value.copy(
                     validation = status?.code,
                     validationHint = status?.hint?.takeIf { it.isNotBlank() },
@@ -187,14 +218,15 @@ class MeasurementEngine {
             }
         }
 
-        observers += launch {
+        observers += launch(work) {
             sdk.processingStatus.asFlow().collect { status ->
                 Log.i(TAG, "processingStatus = $status")
+                DeviceLog.add("processing $status")
                 _live.value = _live.value.copy(processing = status)
             }
         }
 
-        observers += launch {
+        observers += launch(work) {
             sdk.error.asFlow().collect { error ->
                 if (error == null) return@collect
                 Log.e(
@@ -203,11 +235,14 @@ class MeasurementEngine {
                         " retryable=" + error.retryable +
                         " message=" + error.message,
                 )
+                DeviceLog.add(
+                    "ERROR ${error.code} retryable=${error.retryable} ${error.message}",
+                )
+                lastErrorAt = SystemClock.elapsedRealtime()
                 // Every error is surfaced now, retryable or not. A retryable
                 // error used to be logged and nothing else, which produced a
                 // scan that ran its full length, collected nothing, and offered
                 // no explanation anywhere on screen.
-                lastErrorAt = SystemClock.elapsedRealtime()
                 _live.value = _live.value.copy(
                     errorText = readableError(error.code.name, error.message),
                 )
@@ -215,13 +250,20 @@ class MeasurementEngine {
             }
         }
 
-        observers += launch {
+        observers += launch(work) {
             sdk.metricsFlow.collect { metrics ->
                 val now = elapsed()
                 payloads++
                 if (metrics.hasCardio()) {
                     cardioPayloads++
                     metrics.cardio.pulseRateList.forEach { sample ->
+                        pulseSamplesSeen++
+                        if (pulseSamplesSeen <= 8) {
+                            DeviceLog.add(
+                                "pulse ${sample.value} stable=${sample.stable} " +
+                                    "conf=${sample.confidence}",
+                            )
+                        }
                         window.onPulseSample(
                             value = sample.value.toDouble(),
                             stable = sample.stable,
@@ -258,49 +300,54 @@ class MeasurementEngine {
                         )
                     }
                 }
-                if (payloads <= 3 || payloads % 50 == 0) {
-                    Log.i(
-                        TAG,
-                        "payload #" + payloads +
-                            " cardio=" + metrics.hasCardio() +
-                            " breathing=" + metrics.hasBreathing() +
-                            " face=" + metrics.hasFace(),
+                if (payloads <= 3 || payloads % 100 == 0) {
+                    DeviceLog.add(
+                        "payload #$payloads cardio=${metrics.hasCardio()} " +
+                            "breathing=${metrics.hasBreathing()} face=${metrics.hasFace()}",
                     )
                 }
-                pushCounts(now)
+                // Deliberately no UI push here. These arrive at frame rate, and
+                // recomposing the whole scan screen 30 times a second was part
+                // of what starved the camera. The 250ms tick publishes instead.
             }
         }
 
         try {
+            // On the caller's dispatcher, which is the main thread: CameraX
+            // binds its use cases there.
             sdk.start()
             startedAt = SystemClock.elapsedRealtime()
+            DeviceLog.add("start() returned")
             Log.i(TAG, "start() returned; requested = " + sdk.config.requestedMetrics)
         } catch (c: CancellationException) {
             observers.forEach { it.cancel() }
             throw c
         } catch (t: Throwable) {
             Log.e(TAG, "start() failed", t)
+            DeviceLog.add("start() FAILED ${t.message}")
             observers.forEach { it.cancel() }
             _live.value = LiveReading()
             return@coroutineScope ScanSummary.failed(readableError(t))
         }
 
         try {
-            while (isActive) {
-                delay(TICK_MILLIS)
-                val now = elapsed()
-                // A dropped-frame error is usually a passing blip. Leaving it
-                // on screen for the rest of the scan hides the framing guidance
-                // underneath it, so it fades once nothing has gone wrong for a
-                // few seconds. A fatal error breaks the loop below regardless.
-                if (_live.value.errorText != null &&
-                    SystemClock.elapsedRealtime() - lastErrorAt > ERROR_VISIBLE_MILLIS
-                ) {
-                    _live.value = _live.value.copy(errorText = null)
+            withContext(work) {
+                while (isActive) {
+                    delay(TICK_MILLIS)
+                    val now = elapsed()
+                    // A dropped-frame error is usually a passing blip. Leaving
+                    // it on screen for the rest of the scan hides the framing
+                    // guidance underneath it, so it fades once nothing has gone
+                    // wrong for a few seconds. A fatal error breaks the loop.
+                    if (_live.value.errorText != null &&
+                        SystemClock.elapsedRealtime() - lastErrorAt > ERROR_VISIBLE_MILLIS
+                    ) {
+                        _live.value = _live.value.copy(errorText = null)
+                    }
+                    pushCounts(now)
+                    if (asyncFailure != null) break
+                    if (window.shouldStop(now)) break
                 }
-                pushCounts(now)
-                if (asyncFailure != null) break
-                if (window.shouldStop(now)) break
             }
         } finally {
             observers.forEach { it.cancel() }
@@ -311,14 +358,13 @@ class MeasurementEngine {
                     .onFailure { Log.w(TAG, "stop() failed", it) }
             }
             sdk.config.previewSurfaceProvider = null
-            Log.i(
-                TAG,
-                "scan finished: payloads=" + payloads +
-                    " cardio=" + cardioPayloads +
-                    " breathing=" + breathingPayloads +
-                    " face=" + facePayloads +
-                    " acceptedPulse=" + window.acceptedPulseCount,
+            DeviceLog.add(
+                "finished: payloads=$payloads cardio=$cardioPayloads " +
+                    "breathing=$breathingPayloads face=$facePayloads " +
+                    "acceptedPulse=${window.acceptedPulseCount} " +
+                    "acceptedFace=${window.acceptedExpressionCount}",
             )
+            Log.i(TAG, "scan finished: payloads=$payloads")
             _live.value = LiveReading()
         }
 
@@ -379,6 +425,9 @@ class MeasurementEngine {
                     (detail?.let { ": $it" } ?: ".")
             "CONFIGURATION_FAILED" ->
                 "The SDK rejected the requested metrics" + (detail?.let { ": $it" } ?: ".")
+            "TIMESTAMP_GAP", "NON_MONOTONIC_TIMESTAMP" ->
+                "The camera skipped frames, so the reading restarted. " +
+                    "Brighter light and closing other apps both help."
             "SUSTAINED_LOW_FRAME_RATE" ->
                 "The camera is delivering frames too slowly to read a pulse. " +
                     "Move into brighter, even light, and stop screen recording " +

@@ -1,84 +1,61 @@
 package com.pausebeforepay.diag
 
 import android.os.Build
-import android.os.Process
-import java.io.BufferedReader
-import java.io.InputStreamReader
+import android.os.SystemClock
 
 /**
- * Reads this app's own log output, on the phone, with no computer attached.
+ * A diagnostic log the app keeps for itself, in memory.
  *
- * Android stopped letting an app read other apps' logs years ago, but an app
- * can still read its own, and the SmartSpectra SDK logs into our process. That
- * makes this the only way to see what the SDK is complaining about when the
- * only hardware available is the phone in your hand.
+ * The first version of this shelled out to `logcat`. That returned nothing on
+ * the only phone available, which is allowed: an app may read its own log, but
+ * nothing obliges a device to let it, and some builds decline. A log that only
+ * works on some phones is no use when there is exactly one phone.
  *
- * Nothing here is sent anywhere. The text is rendered on screen, and goes
- * further only if the person taps Share and chooses where it goes.
+ * So the app writes its own. It cannot capture the SDK's internal logging this
+ * way, only what this code observes, which turns out to be the part that
+ * matters: which metrics arrive, how often, and what the SDK says when it
+ * refuses to produce one.
+ *
+ * Nothing here leaves the device on its own.
  */
 object DeviceLog {
 
-    /** Lines kept. Enough for a whole scan, small enough to scroll and to share. */
-    private const val MAX_LINES = 400
+    private const val MAX_LINES = 600
 
-    /** Tags worth keeping. Everything else in our process is noise. */
-    private val INTERESTING = listOf(
-        "MeasurementEngine",
-        "SmartSpectra",
-        "Presage",
-        "presage",
-        "CameraX",
-        "Camera2",
-        "libpresage",
-        "physiology",
-    )
+    private val lines = ArrayDeque<String>()
+    private var epoch = SystemClock.elapsedRealtime()
 
-    /**
-     * Returns the interesting part of this process's log, newest last, or an
-     * explanation if the log could not be read.
-     */
-    fun capture(): String {
-        val raw = runCatching { readOwnLog() }
-            .getOrElse { return "Could not read the log on this device: ${it.message}" }
-
-        if (raw.isEmpty()) {
-            return "The log came back empty. Run a camera check first, then open " +
-                "this screen again without closing the app in between."
-        }
-
-        val kept = raw.filter { line -> INTERESTING.any { line.contains(it) } }
-        val body = if (kept.isEmpty()) raw.takeLast(MAX_LINES) else kept.takeLast(MAX_LINES)
-
-        return buildString {
-            appendLine(header())
-            appendLine()
-            body.forEach { appendLine(it) }
-        }
+    /** Starts a fresh log, so one scan's lines are not buried under the last. */
+    @Synchronized
+    fun beginSection(title: String) {
+        if (lines.size > MAX_LINES / 2) lines.clear()
+        epoch = SystemClock.elapsedRealtime()
+        add("--- $title ---")
     }
 
-    private fun header(): String = buildString {
+    @Synchronized
+    fun add(line: String) {
+        val at = (SystemClock.elapsedRealtime() - epoch) / 1000.0
+        lines.addLast(String.format("%6.2fs  %s", at, line))
+        while (lines.size > MAX_LINES) lines.removeFirst()
+    }
+
+    @Synchronized
+    fun snapshot(): String = buildString {
         appendLine("PauseBeforePay diagnostics")
         appendLine("device: ${Build.MANUFACTURER} ${Build.MODEL}")
         appendLine("android: ${Build.VERSION.RELEASE} (api ${Build.VERSION.SDK_INT})")
-        append("lines below are this app's own log, newest last")
+        appendLine()
+        if (lines.isEmpty()) {
+            appendLine("Nothing recorded yet. Run a camera check, then come back here")
+            appendLine("without closing the app in between.")
+        } else {
+            lines.forEach { appendLine(it) }
+        }
     }
 
-    private fun readOwnLog(): List<String> {
-        // --pid limits output to this process. Without it the command returns
-        // nothing useful on a modern device anyway, since an app may only read
-        // its own log.
-        val process = ProcessBuilder(
-            "logcat",
-            "-d",
-            "-v",
-            "time",
-            "--pid=${Process.myPid()}",
-        ).redirectErrorStream(true).start()
-
-        val lines = BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
-            reader.readLines()
-        }
-        runCatching { process.waitFor() }
-        return lines
+    @Synchronized
+    fun clear() {
+        lines.clear()
     }
 }
