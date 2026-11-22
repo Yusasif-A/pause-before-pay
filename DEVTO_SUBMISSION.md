@@ -165,6 +165,8 @@ An app that can hard-stop your money on a heart-rate reading is a worse app than
 
 On my test phone, in evening light, the camera could not sustain the frame rate the SDK needs, so the measurement in the recording does not complete. The app reports that plainly — *"Reading was unclear. Nothing is being held up."* — and lets the transfer through with Confirm enabled.
 
+Two things I only understood at the end explain it. The test device is a **Redmi Note 11 (Helio G88)**, which is not on Presage's [supported platforms list](https://github.com/Presage-Security/SmartSpectra/blob/main/android/README.md) — their tested devices are Pixel, Galaxy and Motorola Edge. And their model card names *"flickering illumination"* as a pulse failure case, which is exactly what an LED bulb on 50 Hz mains is. The device log showed the rest: a 793 ms blocking call to `ICameraDeviceUser` and a 1858 ms UI frame, and `TIMESTAMP_GAP` fires on a gap over two seconds. The camera was stalling outright, and the SDK correctly refused to guess a pulse from an unevenly sampled signal.
+
 I would rather show that than fake a number. The degradation path is the part of this build I am most glad works, because it is the behaviour that matters most when this idea meets a real phone in bad light.
 
 ## Prize Categories
