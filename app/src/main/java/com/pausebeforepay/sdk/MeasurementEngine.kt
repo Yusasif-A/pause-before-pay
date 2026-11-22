@@ -366,7 +366,9 @@ class MeasurementEngine {
             "CONFIGURATION_FAILED" ->
                 "The SDK rejected the requested metrics" + (detail?.let { ": $it" } ?: ".")
             "SUSTAINED_LOW_FRAME_RATE" ->
-                "The camera is running too slowly for a reliable reading. Try better light."
+                "The camera is delivering frames too slowly to read a pulse. " +
+                    "Move into brighter, even light, and stop screen recording " +
+                    "or anything else using the camera."
             else -> detail ?: "The camera measurement stopped unexpectedly ($code)."
         }
     }

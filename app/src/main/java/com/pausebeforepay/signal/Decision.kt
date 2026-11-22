@@ -292,7 +292,8 @@ object DecisionEngine {
         ValidationCode.EXCESSIVE_MOTION ->
             "Hold still and try again."
         ValidationCode.FRAME_RATE_TOO_LOW ->
-            "The camera was running slowly. Close other apps and try again."
+            "The camera was delivering frames too slowly. Move into brighter light, " +
+                "and stop screen recording or other apps using the camera."
         ValidationCode.CAMERA_TUNING ->
             "The camera was still adjusting. Try again."
         ValidationCode.OK, null ->

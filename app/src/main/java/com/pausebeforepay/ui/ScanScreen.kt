@@ -17,7 +17,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -90,11 +92,16 @@ fun ScanScreen(
         if (permissionGranted && surfaceReady) onStart()
     }
 
+    // Scrollable: on a 1600px-tall phone the preview, two tiles, the face row,
+    // the progress bar and the guidance card together overflow the screen, and
+    // the overflow silently ate both the end of the guidance text and the
+    // Cancel button. Nothing below the fold is reachable without this.
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(Pbp.Background)
             .safeDrawingPadding()
+            .verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 12.dp),
     ) {
         Text(
@@ -116,7 +123,7 @@ fun ScanScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(320.dp)
+                .height(280.dp)
                 .clip(RoundedCornerShape(24.dp))
                 .background(Pbp.Surface),
         ) {
@@ -127,7 +134,13 @@ fun ScanScreen(
                         PreviewView(ctx).apply {
                             contentDescription = "Front camera preview"
                             scaleType = PreviewView.ScaleType.FILL_CENTER
-                            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                            // PERFORMANCE uses a SurfaceView, which the system
+                            // composites directly. COMPATIBLE routes every
+                            // frame through a TextureView and an extra GPU
+                            // copy, which costs throughput the SDK needs: it
+                            // reports SUSTAINED_LOW_FRAME_RATE and computes
+                            // nothing when frames do not keep up.
+                            implementationMode = PreviewView.ImplementationMode.PERFORMANCE
                             onPreviewSurfaceReady(surfaceProvider)
                             surfaceReady = true
                         }
