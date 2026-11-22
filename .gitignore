@@ -25,3 +25,12 @@ captures/
 # OS
 .DS_Store
 Thumbs.db
+
+# Working documents, not part of the deliverable
+PAUSEBEFOREPAY_BUILD_BRIEF.md
+PauseBeforePay_Presage_PRD*.md
+DEVTO_POST.md
+
+# Local scratch
+*.log
+/out/
